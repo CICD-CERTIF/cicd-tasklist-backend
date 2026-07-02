@@ -2,146 +2,164 @@ pipeline {
     agent any
 
     environment {
-        // Personnalisé pour ton projet
-        DOCKER_IMAGE      = 'ndongmo/cicd-tasklist-backend'
-        DOCKER_TAG        = "${BUILD_NUMBER}"
-        
-        // Sécurité / Contournement de l'erreur ca.pem (TLS) sur ton Jenkins local
-        DOCKER_TLS_VERIFY = '0'
-        DOCKER_CERT_PATH   = ''
-        
-        // Ton ID d'identifiant configuré dans Jenkins pour Docker Hub
-        DOCKER_CRED_ID    = 'wilfrid-dockerhub-password' 
+        DOCKER_CREDENTIALS_ID = 'wilfrid-dockerhub-password'
+        SONAR_HOST_URL = 'https://sonarqube.cicd.kits.ext.educentre.fr'
+        SONAR_PROJECT_KEY = 'wilfrid-cicd-tasklist-backend'
+    }
+
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
     }
 
     stages {
-        stage('Install Dependencies') {
+        stage('Install dependencies') {
             steps {
                 sh 'npm ci'
-                sh 'npx prisma generate'
             }
         }
 
-        stage('Unit Tests') {
+        stage('Generate Prisma client') {
             steps {
-                sh 'npx prisma generate --schema=prisma/schema-test.prisma'
-                sh 'npm run test:coverage'
+                sh 'npm run prisma:generate'
+            }
+        }
+
+        stage('Run tests') {
+            steps {
+                sh 'npm run test:all:coverage'
             }
             post {
                 always {
-                    junit testResults: 'reports/junit.xml'
+                    junit 'reports/junit.xml'
                 }
             }
         }
 
-        stage('E2E Tests') {
+        stage('SonarQube analysis') {
             steps {
-                sh 'npm run test:e2e:coverage'
-            }
-            post {
-                always {
-                    junit testResults: 'reports/junit.xml'
-                }
-            }
-        }
-
-        stage('SonarQube Analysis') {
-            steps {
-                withSonarQubeEnv('sonarqube-server-1') {
-                    sh 'npx sonar-scanner'
+                withSonarQubeEnv('sonar-wilfrid') {
+                    withCredentials([
+                        string(credentialsId: 'wilfrid-sonar-token-backend', variable: 'SONAR_TOKEN')
+                    ]) {
+                        sh '''
+                            npx --yes sonar-scanner \
+                              -Dsonar.projectKey=$SONAR_PROJECT_KEY \
+                              -Dsonar.sources=src \
+                              -Dsonar.test.inclusions=**/*.test.ts \
+                              -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
+                              -Dsonar.sourceEncoding=UTF-8 \
+                              -Dsonar.host.url=$SONAR_HOST_URL \
+                              -Dsonar.token=$SONAR_TOKEN
+                        '''
+                    }
                 }
             }
         }
 
         stage('Quality Gate') {
             steps {
-                timeout(time: 2, unit: 'MINUTES') {
+                timeout(time: 5, unit: 'MINUTES') {
                     waitForQualityGate abortPipeline: true
                 }
             }
         }
 
-        stage('Docker Build') {
+        stage('Build Docker image') {
             steps {
-                sh """
-                    docker buildx create --use --name tasklist-builder || true
-                    docker buildx build \\
-                        --tag ${DOCKER_IMAGE}:${DOCKER_TAG} \\
-                        --tag ${DOCKER_IMAGE}:latest \\
-                        --load \\
-                        .
-                """
+                withCredentials([usernamePassword(
+                    credentialsId: DOCKER_CREDENTIALS_ID,
+                    usernameVariable: 'DOCKER_USERNAME',
+                    passwordVariable: 'DOCKER_PASSWORD'
+                )]) {
+                    sh '''
+                        docker build \
+                          -t ${DOCKER_USERNAME}/cicd-tasklist-backend:${BUILD_NUMBER} \
+                          -t ${DOCKER_USERNAME}/cicd-tasklist-backend:latest \
+                          .
+                    '''
+                }
             }
         }
 
-        stage('Trivy Scan') {
+        stage('Trivy scan') {
             steps {
-                sh 'mkdir -p reports'
-                sh """
-                    trivy image \\
-                        --severity CRITICAL,HIGH \\
-                        --format table \\
-                        --output reports/trivy-report.txt \\
-                        ${DOCKER_IMAGE}:${DOCKER_TAG}
+                withCredentials([usernamePassword(
+                    credentialsId: DOCKER_CREDENTIALS_ID,
+                    usernameVariable: 'DOCKER_USERNAME',
+                    passwordVariable: 'DOCKER_PASSWORD'
+                )]) {
+                    sh '''
+                        trivy image \
+                          --format json \
+                          --output trivy-report.json \
+                          --severity HIGH,CRITICAL \
+                          ${DOCKER_USERNAME}/cicd-tasklist-backend:${BUILD_NUMBER} || true
 
-                    trivy image \\
-                        --format json \\
-                        --output reports/trivy-report.json \\
-                        ${DOCKER_IMAGE}:${DOCKER_TAG}
-
-                    trivy image \\
-                        --format sarif \\
-                        --output reports/trivy-report.sarif \\
-                        ${DOCKER_IMAGE}:${DOCKER_TAG}
-                """
+                        trivy image \
+                          --format table \
+                          --severity HIGH,CRITICAL \
+                          ${DOCKER_USERNAME}/cicd-tasklist-backend:${BUILD_NUMBER} || true
+                    '''
+                }
             }
             post {
                 always {
-                    archiveArtifacts artifacts: 'reports/trivy-report.*'
+                    archiveArtifacts artifacts: 'trivy-report.json', allowEmptyArchive: true
                 }
+            }
+        }
+
+        stage('Check Trivy vulnerabilities') {
+            steps {
+                sh '''
+                    CRITICAL_COUNT=$(grep -o '"Severity":"CRITICAL"' trivy-report.json | wc -l || echo 0)
+                    HIGH_COUNT=$(grep -o '"Severity":"HIGH"' trivy-report.json | wc -l || echo 0)
+                    echo "Found ${CRITICAL_COUNT} CRITICAL and ${HIGH_COUNT} HIGH vulnerabilities"
+                    if [ ${CRITICAL_COUNT} -gt 0 ] || [ ${HIGH_COUNT} -gt 0 ]; then
+                        echo "Blocking pipeline due to HIGH or CRITICAL vulnerabilities!"
+                        exit 1
+                    fi
+                '''
             }
         }
 
         stage('Generate SBOM') {
             steps {
-                sh """
-                    trivy image \\
-                        --format spdx-json \\
-                        --output reports/sbom-spdx.json \\
-                        ${DOCKER_IMAGE}:${DOCKER_TAG}
-
-                    trivy image \\
-                        --format cyclonedx \\
-                        --output reports/sbom-cyclonedx.json \\
-                        ${DOCKER_IMAGE}:${DOCKER_TAG}
-                """
+                withCredentials([usernamePassword(
+                    credentialsId: DOCKER_CREDENTIALS_ID,
+                    usernameVariable: 'DOCKER_USERNAME',
+                    passwordVariable: 'DOCKER_PASSWORD'
+                )]) {
+                    sh '''
+                        trivy image \
+                          --format spdx-json \
+                          --output sbom.spdx.json \
+                          ${DOCKER_USERNAME}/cicd-tasklist-backend:${BUILD_NUMBER}
+                    '''
+                }
             }
             post {
                 always {
-                    archiveArtifacts artifacts: 'reports/sbom-*'
+                    archiveArtifacts artifacts: 'sbom.spdx.json', allowEmptyArchive: true
                 }
             }
         }
 
-        stage('Docker Push') {
+        stage('Push Docker image') {
             steps {
-                withCredentials([usernamePassword(credentialsId: "${DOCKER_CRED_ID}", usernameVariable: 'DOCKERHUB_CREDENTIALS_USR', passwordVariable: 'DOCKERHUB_CREDENTIALS_PSW')]) {
-                    sh """
-                        echo \$DOCKERHUB_CREDENTIALS_PSW | docker login -u \$DOCKERHUB_CREDENTIALS_USR --password-stdin
-                        docker buildx build \\
-                            --platform linux/amd64 \\
-                            --tag ${DOCKER_IMAGE}:${DOCKER_TAG} \\
-                            --tag ${DOCKER_IMAGE}:latest \\
-                            --sbom=true \\
-                            --provenance=true \\
-                            --push \\
-                            .
-                    """
-                }
-            }
-            post {
-                always {
-                    sh 'docker logout'
+                withCredentials([usernamePassword(
+                    credentialsId: DOCKER_CREDENTIALS_ID,
+                    usernameVariable: 'DOCKER_USERNAME',
+                    passwordVariable: 'DOCKER_PASSWORD'
+                )]) {
+                    sh '''
+                        echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin
+                        docker push ${DOCKER_USERNAME}/cicd-tasklist-backend:${BUILD_NUMBER}
+                        docker push ${DOCKER_USERNAME}/cicd-tasklist-backend:latest
+                        docker logout
+                    '''
                 }
             }
         }
@@ -150,12 +168,6 @@ pipeline {
     post {
         always {
             cleanWs()
-        }
-        success {
-            echo 'Backend pipeline completed successfully!'
-        }
-        failure {
-            echo 'Backend pipeline failed!'
         }
     }
 }
