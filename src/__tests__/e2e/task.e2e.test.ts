@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import request from "supertest";
-import { app } from "../../app.ts";
+import app from "../../app.ts"; // <-- CORRECTION : On retire les accolades pour intercepter l'export par défaut
 import prisma from "../../lib/prisma.ts";
 
 describe("Tasks API - End-to-End (E2E)", () => {
