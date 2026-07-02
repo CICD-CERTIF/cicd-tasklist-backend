@@ -5,6 +5,7 @@ pipeline {
         DOCKER_CREDENTIALS_ID = 'wilfrid-dockerhub-password'
         SONAR_HOST_URL = 'https://sonarqube.cicd.kits.ext.educentre.fr'
         SONAR_PROJECT_KEY = 'wilfrid-cicd-tasklist-backend'
+        DOCKER_USERNAME = 'ndongmo'
     }
 
     options {
