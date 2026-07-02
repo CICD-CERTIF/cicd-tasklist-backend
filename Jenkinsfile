@@ -50,8 +50,12 @@ pipeline {
 
         stage('5. Exécution des tests end-to-end') {
             steps {
-                echo 'Exécution des tests d intégration de bout en bout (E2E)...'
-                sh 'npm run test:e2e'
+                echo 'Préparation de la base de données de test et exécution des tests E2E...'
+                // On pousse le schéma sur notre base SQLite locale définie par vitest.config.ts
+                sh 'DATABASE_URL="file:./prisma/test-e2e.db" npx prisma db push'
+                
+                // On injecte également la variable d'environnement lors de l'exécution du script
+                sh 'DATABASE_URL="file:./prisma/test-e2e.db" npm run test:e2e'
             }
         }
 
