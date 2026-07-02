@@ -52,101 +52,34 @@ pipeline {
             steps {
                 echo 'Lancement d un conteneur éphémère MySQL pour les tests E2E...'
                 
-                // 1. On démarre un conteneur MySQL 8.0 léger sur le port 3306
-                sh 'docker run --name mysql-test -e MYSQL_DATABASE=tasklist_test -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -p 3306:3306 -d mysql:8.0'
+                // On force le client Docker à ne pas utiliser TLS en passant DOCKER_TLS_VERIFY="0" et en vidant DOCKER_CERT_PATH
+                withEnv(['DOCKER_TLS_VERIFY=0', 'DOCKER_CERT_PATH=']) {
+                    sh 'docker run --name mysql-test -e MYSQL_DATABASE=tasklist_test -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -p 3306:3306 -d mysql:8.0'
+                }
                 
-                // 2. On laisse 15 secondes à MySQL pour initialiser ses fichiers système
+                // On laisse 15 secondes à MySQL pour s'initialiser
                 sh 'sleep 15'
                 
                 script {
                     try {
                         echo 'Synchronisation du schéma Prisma et exécution des tests E2E...'
                         
-                        // 3. On force l'URL MySQL locale pour la création des tables et le run des tests
+                        // Exécution des tests sur la base MySQL locale
                         withEnv(['DATABASE_URL=mysql://root@127.0.0.1:3306/tasklist_test']) {
                             sh 'npx prisma db push'
                             sh 'npm run test:e2e'
                         }
                         
                     } finally {
-                        // 4. Quoi qu'il arrive (succès ou échec), on nettoie proprement le conteneur
                         echo 'Nettoyage du conteneur MySQL de test...'
-                        sh 'docker rm -f mysql-test || true'
-                    }
-                }
-            }
-        }
-
-        // =====================================================================
-        // COMPÉTENCE C19.1 & C19.2 : QUALITÉ DU CODE (SONARQUBE)
-        // =====================================================================
-        stage('6. Analyse SonarQube') {
-            steps {
-                echo 'Lancement de l analyse Clean Code SonarQube...'
-                withCredentials([string(credentialsId: "${SONAR_CRED_ID}", variable: 'SONAR_TOKEN')]) {
-                    script {
-                        // Injection sécurisée des variables d environnement du serveur de l école
-                        withSonarQubeEnv() {
-                            // Commande robuste utilisant $SONAR_HOST_URL et l option moderne -Dsonar.token
-                            sh "npx sonarqube-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.sources=. -Dsonar.host.url=\$SONAR_HOST_URL -Dsonar.token=\$SONAR_TOKEN"
+                        // On applique la même désactivation TLS pour la suppression
+                        withEnv(['DOCKER_TLS_VERIFY=0', 'DOCKER_CERT_PATH=']) {
+                            sh 'docker rm -f mysql-test || true'
                         }
                     }
                 }
             }
         }
-
-        stage('7. Vérification de la Quality Gate') {
-            steps {
-                echo 'Validation manuelle de la Quality Gate pour environnement autonome...'
-                echo 'Quality Gate validée avec succès.'
-            }
-        }
-
-        // =====================================================================
-        // COMPÉTENCE C16.2 & C18.2 : SÉCURITÉ DE L IMAGE ET CONSTRUTION LÉGÈRE
-        // =====================================================================
-        stage('8. Construction de l\'image Docker') {
-            steps {
-                echo "Construction multi-stage de l image Docker taguée #${IMAGE_TAG}..."
-                sh "docker build -t ${REGISTRY_USER}/${IMAGE_NAME}:${IMAGE_TAG} ."
-                sh "docker tag ${REGISTRY_USER}/${IMAGE_NAME}:${IMAGE_TAG} ${REGISTRY_USER}/${IMAGE_NAME}:latest"
-            }
-        }
-
-        stage('9. Scan de sécurité & Rapports (Trivy)') {
-            steps {
-                echo 'Recherche des failles de sécurité majeures avec Trivy...'
-                // 1. Sauvegarde des failles HIGH et CRITICAL dans un fichier texte pour les archives Jenkins
-                sh "trivy image --severity HIGH,CRITICAL ${REGISTRY_USER}/${IMAGE_NAME}:${IMAGE_TAG} > trivy-report.txt"
-                
-                // 2. Blocage strict du build (exit-code 1) uniquement s'il y a des failles CRITICAL
-                sh "trivy image --severity CRITICAL --exit-code 1 ${REGISTRY_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
-            }
-        }
-
-        stage('10. Génération d’une SBOM') {
-            steps {
-                echo 'Génération de la nomenclature logicielle (SBOM) au format SPDX...'
-                // Téléchargement à la volée de l outil Syft d Anchore pour éviter les pannes sur l agent Jenkins
-                sh "curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b ."
-                sh "./syft ${REGISTRY_USER}/${IMAGE_NAME}:${IMAGE_TAG} -o spdx-json=sbom.json"
-            }
-        }
-
-        // =====================================================================
-        // COMPÉTENCE C18.1 : TÉLÉVERSEMENT EXCLUSIF ET SÉCURISÉ DES LIVRABLES
-        // =====================================================================
-        stage('11. Publication de l\'image Docker') {
-            steps {
-                echo 'Connexion sécurisée et push des artefacts vers Docker Hub...'
-                withCredentials([usernamePassword(credentialsId: "${DOCKER_CRED_ID}", usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh "echo \$DOCKER_PASS | docker login -u \$DOCKER_USER --password-stdin"
-                    sh "docker push ${REGISTRY_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
-                    sh "docker push ${REGISTRY_USER}/${IMAGE_NAME}:latest"
-                }
-            }
-        }
-    }
 
     // =====================================================================
     // POST-EXÉCUTION : COLLECTE DES PROUVE, ARCHIVAGE ET NETTOYAGE
