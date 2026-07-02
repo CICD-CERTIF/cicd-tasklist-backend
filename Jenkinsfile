@@ -67,7 +67,7 @@ pipeline {
                     sh 'DATABASE_URL="mysql://root@localhost:3306/tasklist_test" npm run test:e2e'
                     
                 } finally {
-                    // 4. Quoi qu'il arrive (succès ou échec des tests), on nettoie le conteneur pour ne pas bloquer les prochains builds
+                    // 4. Quoi qu'il arrive (succès oud échec des tests), on nettoie le conteneur pour ne pas bloquer les prochains builds
                     echo 'Nettoyage du conteneur MySQL de test...'
                     sh 'docker rm -f mysql-test || true'
                 }
