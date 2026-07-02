@@ -67,22 +67,6 @@ pipeline {
             }
         }
 
-        // stage('Build Docker image') {
-        //     steps {
-        //         withCredentials([usernamePassword(
-        //             credentialsId: DOCKER_CREDENTIALS_ID,
-        //             usernameVariable: 'DOCKER_USERNAME',
-        //             passwordVariable: 'DOCKER_PASSWORD'
-        //         )]) {
-        //             sh '''
-        //                 docker build \
-        //                   -t ${DOCKER_USERNAME}/cicd-tasklist-backend:${BUILD_NUMBER} \
-        //                   -t ${DOCKER_USERNAME}/cicd-tasklist-backend:latest \
-        //                   .
-        //             '''
-        //         }
-        //     }
-        // }
         stage('Build Docker image') {
             steps {
                 sh """
@@ -94,27 +78,21 @@ pipeline {
             }
         }
 
+
         stage('Trivy scan') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: DOCKER_CREDENTIALS_ID,
-                    usernameVariable: 'DOCKER_USERNAME',
-                    passwordVariable: 'DOCKER_PASSWORD'
-                )]) {
-                    // Remplacement de 'ndongmo' en dur par la variable dynamique
-                    sh '''
-                        trivy image \
-                          --format json \
-                          --output trivy-report.json \
-                          --severity HIGH,CRITICAL \
-                          ${DOCKER_USERNAME}/cicd-tasklist-backend:${BUILD_NUMBER} || true
+                sh """
+                    trivy image \
+                      --format json \
+                      --output trivy-report.json \
+                      --severity HIGH,CRITICAL \
+                      ${DOCKER_USERNAME}/cicd-tasklist-backend:${BUILD_NUMBER} || true
 
-                        trivy image \
-                          --format table \
-                          --severity HIGH,CRITICAL \
-                          ${DOCKER_USERNAME}/cicd-tasklist-backend:${BUILD_NUMBER} || true
-                    '''
-                }
+                    trivy image \
+                      --format table \
+                      --severity HIGH,CRITICAL \
+                      ${DOCKER_USERNAME}/cicd-tasklist-backend:${BUILD_NUMBER} || true
+                """
             }
             post {
                 always {
