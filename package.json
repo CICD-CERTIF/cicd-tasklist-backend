@@ -16,12 +16,8 @@
   "dependencies": {
     "@prisma/client": "^6.9.0",
     "cors": "^2.8.5",
-    "cross-spawn": "^7.0.6",
     "dotenv": "^16.5.0",
-    "express": "^5.1.0",
-    "glob": "^13.0.6",
-    "minimatch": "^10.2.5",
-    "tar": "^7.5.19"
+    "express": "^5.1.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
