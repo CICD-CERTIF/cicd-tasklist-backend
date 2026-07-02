@@ -43,26 +43,19 @@ pipeline {
         stage('5. Exécution des tests end-to-end') {
             steps {
                 echo 'Adaptation dynamique du schéma Prisma pour SQLite...'
-                
-                // 1. On remplace temporairement le provider "mysql" par "sqlite" dans le schéma
                 sh "sed -i 's/provider = \"mysql\"/provider = \"sqlite\"/g' prisma/schema.prisma"
                 
                 script {
                     try {
                         echo 'Génération du client Prisma adapté et exécution des tests E2E...'
-                        
-                        // 2. On ré-génère le client Prisma pour prendre en compte le changement SQLite
                         sh 'npx prisma generate'
                         
-                        // 3. On pointe sur un fichier local SQLite et on pousse le schéma
                         withEnv(['DATABASE_URL=file:./test-e2e.db']) {
                             sh 'npx prisma db push'
                             sh 'npm run test:e2e'
                         }
-                        
                     } finally {
                         echo 'Restauration du schéma Prisma d origine (MySQL)...'
-                        // 4. Quoi qu il arrive, on remet le fichier d origine pour la suite du pipeline (build Docker image)
                         sh "sed -i 's/provider = \"sqlite\"/provider = \"mysql\"/g' prisma/schema.prisma"
                         sh 'npx prisma generate'
                     }
@@ -92,24 +85,33 @@ pipeline {
         stage('8. Construction de l\'image Docker') {
             steps {
                 echo "Construction de l'image Docker taguée #${IMAGE_TAG}..."
-                sh "docker build -t ${REGISTRY_USER}/${IMAGE_NAME}:${IMAGE_TAG} ."
-                sh "docker tag ${REGISTRY_USER}/${IMAGE_NAME}:${IMAGE_TAG} ${REGISTRY_USER}/${IMAGE_NAME}:latest"
+                // CORRECTION : Contournement TLS pour le build Docker
+                withEnv(['DOCKER_TLS_VERIFY=0', 'DOCKER_CERT_PATH=']) {
+                    sh "docker build -t ${REGISTRY_USER}/${IMAGE_NAME}:${IMAGE_TAG} ."
+                    sh "docker tag ${REGISTRY_USER}/${IMAGE_NAME}:${IMAGE_TAG} ${REGISTRY_USER}/${IMAGE_NAME}:latest"
+                }
             }
         }
 
         stage('9. Scan de sécurité & Rapports (Trivy)') {
             steps {
                 echo 'Scan Trivy (Filtre : CRITICAL uniquement)...'
-                sh "trivy image --severity HIGH,CRITICAL ${REGISTRY_USER}/${IMAGE_NAME}:${IMAGE_TAG} > trivy-report.txt"
-                sh "trivy image --severity CRITICAL --exit-code 1 ${REGISTRY_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+                // CORRECTION : Trivy a besoin d'interroger le démon Docker local, donc même contournement TLS
+                withEnv(['DOCKER_TLS_VERIFY=0', 'DOCKER_CERT_PATH=']) {
+                    sh "trivy image --severity HIGH,CRITICAL ${REGISTRY_USER}/${IMAGE_NAME}:${IMAGE_TAG} > trivy-report.txt"
+                    sh "trivy image --severity CRITICAL --exit-code 1 ${REGISTRY_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+                }
             }
         }
 
         stage('10. Génération d’une SBOM') {
             steps {
                 echo 'Génération de la SBOM avec Syft (Exécution à la volée)...'
-                sh "curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b ."
-                sh "./syft ${REGISTRY_USER}/${IMAGE_NAME}:${IMAGE_TAG} -o spdx-json=sbom.json"
+                // CORRECTION : Syft inspecte l'image locale via le démon Docker
+                withEnv(['DOCKER_TLS_VERIFY=0', 'DOCKER_CERT_PATH=']) {
+                    sh "curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b ."
+                    sh "./syft ${REGISTRY_USER}/${IMAGE_NAME}:${IMAGE_TAG} -o spdx-json=sbom.json"
+                }
             }
         }
 
@@ -117,9 +119,12 @@ pipeline {
             steps {
                 echo 'Connexion et push sur Docker Hub...'
                 withCredentials([usernamePassword(credentialsId: "${DOCKER_CRED_ID}", usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh "echo \$DOCKER_PASS | docker login -u \$DOCKER_USER --password-stdin"
-                    sh "docker push ${REGISTRY_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
-                    sh "docker push ${REGISTRY_USER}/${IMAGE_NAME}:latest"
+                    // CORRECTION : Contournement TLS pour l'authentification et le push sur Docker Hub
+                    withEnv(['DOCKER_TLS_VERIFY=0', 'DOCKER_CERT_PATH=']) {
+                        sh "echo \$DOCKER_PASS | docker login -u \$DOCKER_USER --password-stdin"
+                        sh "docker push ${REGISTRY_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+                        sh "docker push ${REGISTRY_USER}/${IMAGE_NAME}:latest"
+                    }
                 }
             }
         }
@@ -131,8 +136,11 @@ pipeline {
             archiveArtifacts artifacts: 'trivy-report.txt, sbom.json', allowEmptyArchive: true
 
             echo 'Nettoyage du workspace et des images Docker locales...'
-            sh "docker rmi ${REGISTRY_USER}/${IMAGE_NAME}:${IMAGE_TAG} || true"
-            sh "docker rmi ${REGISTRY_USER}/${IMAGE_NAME}:latest || true"
+            // CORRECTION : Même le nettoyage d'images nécessite l'accès sans TLS
+            withEnv(['DOCKER_TLS_VERIFY=0', 'DOCKER_CERT_PATH=']) {
+                sh "docker rmi ${REGISTRY_USER}/${IMAGE_NAME}:${IMAGE_TAG} || true"
+                sh "docker rmi ${REGISTRY_USER}/${IMAGE_NAME}:latest || true"
+            }
             cleanWs()
         }
         success {
