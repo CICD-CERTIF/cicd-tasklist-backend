@@ -50,12 +50,27 @@ pipeline {
 
         stage('5. Exécution des tests end-to-end') {
             steps {
-                echo 'Préparation de la base de données de test et exécution des tests E2E...'
-                // On pousse le schéma sur notre base SQLite locale définie par vitest.config.ts
-                sh 'DATABASE_URL="file:./prisma/test-e2e.db" npx prisma db push'
+                echo 'Lancement d un conteneur éphémère MySQL pour les tests E2E...'
                 
-                // On injecte également la variable d'environnement lors de l'exécution du script
-                sh 'DATABASE_URL="file:./prisma/test-e2e.db" npm run test:e2e'
+                // 1. On démarre un conteneur MySQL léger à côté (dans le réseau DinD)
+                // Note : On l'appelle 'mysql-test'
+                sh 'docker run --name mysql-test -e MYSQL_DATABASE=tasklist_test -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -p 3306:3306 -d mysql:8.0'
+                
+                // 2. On laisse 15 secondes au conteneur pour s'initialiser correctement
+                sh 'sleep 15'
+                
+                try {
+                    echo 'Exécution des migrations et des tests E2E sur MySQL...'
+                    
+                    // 3. On passe l'URL MySQL officielle à Prisma (l'hôte est localhost car le port 3306 est mappé)
+                    sh 'DATABASE_URL="mysql://root@localhost:3306/tasklist_test" npx prisma db push'
+                    sh 'DATABASE_URL="mysql://root@localhost:3306/tasklist_test" npm run test:e2e'
+                    
+                } finally {
+                    // 4. Quoi qu'il arrive (succès ou échec des tests), on nettoie le conteneur pour ne pas bloquer les prochains builds
+                    echo 'Nettoyage du conteneur MySQL de test...'
+                    sh 'docker rm -f mysql-test || true'
+                }
             }
         }
 
