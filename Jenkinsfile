@@ -52,24 +52,26 @@ pipeline {
             steps {
                 echo 'Lancement d un conteneur éphémère MySQL pour les tests E2E...'
                 
-                // 1. On démarre un conteneur MySQL léger à côté (dans le réseau DinD)
-                // Note : On l'appelle 'mysql-test'
+                // 1. On démarre le conteneur MySQL
                 sh 'docker run --name mysql-test -e MYSQL_DATABASE=tasklist_test -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -p 3306:3306 -d mysql:8.0'
                 
-                // 2. On laisse 15 secondes au conteneur pour s'initialiser correctement
+                // 2. On attend son initialisation
                 sh 'sleep 15'
                 
-                try {
-                    echo 'Exécution des migrations et des tests E2E sur MySQL...'
-                    
-                    // 3. On passe l'URL MySQL officielle à Prisma (l'hôte est localhost car le port 3306 est mappé)
-                    sh 'DATABASE_URL="mysql://root@localhost:3306/tasklist_test" npx prisma db push'
-                    sh 'DATABASE_URL="mysql://root@localhost:3306/tasklist_test" npm run test:e2e'
-                    
-                } finally {
-                    // 4. Quoi qu'il arrive (succès oud échec des tests), on nettoie le conteneur pour ne pas bloquer les prochains builds
-                    echo 'Nettoyage du conteneur MySQL de test...'
-                    sh 'docker rm -f mysql-test || true'
+                // CORRECTION : On dit à Jenkins qu'on va écrire du Groovy natif grâce au bloc script
+                script {
+                    try {
+                        echo 'Exécution des migrations et des tests E2E sur MySQL...'
+                        
+                        // 3. On pousse les tables et on lance les tests E2E
+                        sh 'DATABASE_URL="mysql://root@localhost:3306/tasklist_test" npx prisma db push'
+                        sh 'DATABASE_URL="mysql://root@localhost:3306/tasklist_test" npm run test:e2e'
+                        
+                    } finally {
+                        // 4. Nettoyage automatique, même si le build échoue
+                        echo 'Nettoyage du conteneur MySQL de test...'
+                        sh 'docker rm -f mysql-test || true'
+                    }
                 }
             }
         }
