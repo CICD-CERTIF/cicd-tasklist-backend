@@ -87,7 +87,6 @@ pipeline {
             steps {
                 withCredentials([usernamePassword(
                     credentialsId: DOCKER_CREDENTIALS_ID,
-                    usernameVariable: 'DOCKER_USERNAME',
                     passwordVariable: 'DOCKER_PASSWORD'
                 )]) {
                     sh '''
@@ -95,12 +94,12 @@ pipeline {
                           --format json \
                           --output trivy-report.json \
                           --severity HIGH,CRITICAL \
-                          ${DOCKER_USERNAME}/cicd-tasklist-backend:${BUILD_NUMBER} || true
+                          ndongmo/cicd-tasklist-backend:${BUILD_NUMBER} || true
 
                         trivy image \
                           --format table \
                           --severity HIGH,CRITICAL \
-                          ${DOCKER_USERNAME}/cicd-tasklist-backend:${BUILD_NUMBER} || true
+                          ndongmo/cicd-tasklist-backend:${BUILD_NUMBER} || true
                     '''
                 }
             }
