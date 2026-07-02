@@ -87,19 +87,21 @@ pipeline {
             steps {
                 withCredentials([usernamePassword(
                     credentialsId: DOCKER_CREDENTIALS_ID,
+                    usernameVariable: 'DOCKER_USERNAME',
                     passwordVariable: 'DOCKER_PASSWORD'
                 )]) {
+                    // Remplacement de 'ndongmo' en dur par la variable dynamique
                     sh '''
                         trivy image \
                           --format json \
                           --output trivy-report.json \
                           --severity HIGH,CRITICAL \
-                          ndongmo/cicd-tasklist-backend:${BUILD_NUMBER} || true
+                          ${DOCKER_USERNAME}/cicd-tasklist-backend:${BUILD_NUMBER} || true
 
                         trivy image \
                           --format table \
                           --severity HIGH,CRITICAL \
-                          ndongmo/cicd-tasklist-backend:${BUILD_NUMBER} || true
+                          ${DOCKER_USERNAME}/cicd-tasklist-backend:${BUILD_NUMBER} || true
                     '''
                 }
             }
