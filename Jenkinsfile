@@ -48,10 +48,32 @@ pipeline {
             }
         }
 
-        stage('5. Exécution des tests end-to-end') {
+    stage('5. Exécution des tests end-to-end') {
             steps {
-                echo 'Exécution des tests d intégration de bout en bout (E2E)...'
-                sh 'npm run test:e2e'
+                echo 'Lancement d un conteneur éphémère MySQL pour les tests E2E...'
+                
+                // 1. On démarre un conteneur MySQL 8.0 léger sur le port 3306
+                sh 'docker run --name mysql-test -e MYSQL_DATABASE=tasklist_test -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -p 3306:3306 -d mysql:8.0'
+                
+                // 2. On laisse 15 secondes à MySQL pour initialiser ses fichiers système
+                sh 'sleep 15'
+                
+                script {
+                    try {
+                        echo 'Synchronisation du schéma Prisma et exécution des tests E2E...'
+                        
+                        // 3. On force l'URL MySQL locale pour la création des tables et le run des tests
+                        withEnv(['DATABASE_URL=mysql://root@127.0.0.1:3306/tasklist_test']) {
+                            sh 'npx prisma db push'
+                            sh 'npm run test:e2e'
+                        }
+                        
+                    } finally {
+                        // 4. Quoi qu'il arrive (succès ou échec), on nettoie proprement le conteneur
+                        echo 'Nettoyage du conteneur MySQL de test...'
+                        sh 'docker rm -f mysql-test || true'
+                    }
+                }
             }
         }
 
