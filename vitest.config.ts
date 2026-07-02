@@ -7,8 +7,10 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
-    // CORRECTION : Pattern standard et récursif pour détecter TOUS les tests (unit et e2e)
-    include: ["src/__tests__/**/*.test.ts"],
+    
+    // CORRECTION ICI : On cible directement TOUT ce qui est dans __tests__ sans exception
+    include: ["src/__tests__/**/*.{test,spec,}.ts", "src/__tests__/**/*.ts"],
+    
     testTimeout: 15000,
     coverage: {
       provider: "v8",
