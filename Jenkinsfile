@@ -67,20 +67,30 @@ pipeline {
             }
         }
 
+        // stage('Build Docker image') {
+        //     steps {
+        //         withCredentials([usernamePassword(
+        //             credentialsId: DOCKER_CREDENTIALS_ID,
+        //             usernameVariable: 'DOCKER_USERNAME',
+        //             passwordVariable: 'DOCKER_PASSWORD'
+        //         )]) {
+        //             sh '''
+        //                 docker build \
+        //                   -t ${DOCKER_USERNAME}/cicd-tasklist-backend:${BUILD_NUMBER} \
+        //                   -t ${DOCKER_USERNAME}/cicd-tasklist-backend:latest \
+        //                   .
+        //             '''
+        //         }
+        //     }
+        // }
         stage('Build Docker image') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: DOCKER_CREDENTIALS_ID,
-                    usernameVariable: 'DOCKER_USERNAME',
-                    passwordVariable: 'DOCKER_PASSWORD'
-                )]) {
-                    sh '''
-                        docker build \
-                          -t ${DOCKER_USERNAME}/cicd-tasklist-backend:${BUILD_NUMBER} \
-                          -t ${DOCKER_USERNAME}/cicd-tasklist-backend:latest \
-                          .
-                    '''
-                }
+                sh """
+                    docker build \
+                      -t ${DOCKER_USERNAME}/cicd-tasklist-backend:${BUILD_NUMBER} \
+                      -t ${DOCKER_USERNAME}/cicd-tasklist-backend:latest \
+                      .
+                """
             }
         }
 
