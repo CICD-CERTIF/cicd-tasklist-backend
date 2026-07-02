@@ -137,20 +137,15 @@ pipeline {
             }
         }
 
+  
         stage('Generate SBOM') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: DOCKER_CREDENTIALS_ID,
-                    usernameVariable: 'DOCKER_USERNAME',
-                    passwordVariable: 'DOCKER_PASSWORD'
-                )]) {
-                    sh '''
-                        trivy image \
-                          --format spdx-json \
-                          --output sbom.spdx.json \
-                          ${DOCKER_USERNAME}/cicd-tasklist-backend:${BUILD_NUMBER}
-                    '''
-                }
+                sh """
+                    trivy image \
+                      --format spdx-json \
+                      --output sbom.spdx.json \
+                      ${DOCKER_USERNAME}/cicd-tasklist-backend:${BUILD_NUMBER}
+                """
             }
             post {
                 always {
@@ -159,19 +154,20 @@ pipeline {
             }
         }
 
+
         stage('Push Docker image') {
             steps {
                 withCredentials([usernamePassword(
-                    credentialsId: DOCKER_CREDENTIALS_ID,
-                    usernameVariable: 'DOCKER_USERNAME',
+                    credentialsId: "${DOCKER_CREDENTIALS_ID}",
+                    usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASSWORD'
                 )]) {
-                    sh '''
-                        echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin
+                    sh """
+                        echo "\${DOCKER_PASSWORD}" | docker login -u "\${DOCKER_USER}" --password-stdin
                         docker push ${DOCKER_USERNAME}/cicd-tasklist-backend:${BUILD_NUMBER}
                         docker push ${DOCKER_USERNAME}/cicd-tasklist-backend:latest
                         docker logout
-                    '''
+                    """
                 }
             }
         }
